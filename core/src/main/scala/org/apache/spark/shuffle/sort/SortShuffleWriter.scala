@@ -50,7 +50,7 @@ private[spark] class SortShuffleWriter[K, V, C](
 
   /** Write a bunch of records to this task's output */
   override def write(records: Iterator[Product2[K, V]]): Unit = {
-    sorter = if (dep.mapSideCombine) {
+    sorter = if (dep.mapSideCombine) {// writer中可以根据shufflehandler获取依赖信息，并且可以获取aggregator、keyordering等信息来开启是否map段聚合
       new ExternalSorter[K, V, C](
         context, dep.aggregator, Some(dep.partitioner), dep.keyOrdering, dep.serializer)
     } else {

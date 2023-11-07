@@ -42,6 +42,7 @@ import org.apache.spark.sql.internal.StaticSQLConf.CATALOG_IMPLEMENTATION
 
 /**
  * Concrete parser for Spark SQL statements.
+ * 处理SQL的词法和语法分析过程
  */
 class SparkSqlParser extends AbstractSqlParser {
   val astBuilder = new SparkSqlAstBuilder()

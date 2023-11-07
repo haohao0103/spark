@@ -70,6 +70,7 @@ private[spark] abstract class EventLoop[E](name: String) extends Logging {
     }
     // Call onStart before starting the event thread to make sure it happens before onReceive
     onStart()
+    // 启动后就一直循环，loop操作
     eventThread.start()
   }
 

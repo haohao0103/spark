@@ -167,6 +167,7 @@ private[spark] class CoarseGrainedExecutorBackend(
     case RegisteredExecutor =>
       logInfo("Successfully registered with driver")
       try {
+        // 创建一个executor
         executor = new Executor(executorId, hostname, env, getUserClassPath, isLocal = false,
           resources = _resources)
         driver.get.send(LaunchedExecutor(executorId))
@@ -175,6 +176,7 @@ private[spark] class CoarseGrainedExecutorBackend(
           exitExecutor(1, "Unable to create executor due to " + e.getMessage, e)
       }
 
+      // executor 启动task ;找不到可以直接搜索LaunchTask
     case LaunchTask(data) =>
       if (executor == null) {
         exitExecutor(1, "Received LaunchTask command but executor was null")
@@ -182,6 +184,7 @@ private[spark] class CoarseGrainedExecutorBackend(
         val taskDesc = TaskDescription.decode(data.value)
         logInfo("Got assigned task " + taskDesc.taskId)
         taskResources(taskDesc.taskId) = taskDesc.resources
+        // 开始执行任务
         executor.launchTask(this, taskDesc)
       }
 

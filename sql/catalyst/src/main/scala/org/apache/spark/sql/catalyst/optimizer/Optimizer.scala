@@ -42,6 +42,7 @@ import org.apache.spark.util.Utils
  */
 abstract class Optimizer(catalogManager: CatalogManager)
   extends RuleExecutor[LogicalPlan] with SQLConfHelper {
+  // 按照定义的规则对一些低效的逻辑计划进行转换
 
   // Check for structural integrity of the plan in test mode.
   // Currently we check after the execution of each rule if a plan:

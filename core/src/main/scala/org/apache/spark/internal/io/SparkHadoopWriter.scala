@@ -118,7 +118,7 @@ object SparkHadoopWriter extends Logging {
       committer: FileCommitProtocol,
       iterator: Iterator[(K, V)]): TaskCommitMessage = {
     // Set up a task.
-    val taskContext = config.createTaskAttemptContext(
+    val taskContext: NewTaskAttemptContext = config.createTaskAttemptContext(
       jobTrackerId, commitJobId, sparkPartitionId, sparkAttemptNumber)
     committer.setupTask(taskContext)
 

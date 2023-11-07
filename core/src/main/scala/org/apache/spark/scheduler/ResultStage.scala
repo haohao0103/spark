@@ -56,7 +56,6 @@ private[spark] class ResultStage(
 
   /**
    * Returns the sequence of partition ids that are missing (i.e. needs to be computed).
-   *
    * This can only be called when there is an active job.
    */
   override def findMissingPartitions(): Seq[Int] = {

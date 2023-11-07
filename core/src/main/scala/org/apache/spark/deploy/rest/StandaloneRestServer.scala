@@ -59,6 +59,7 @@ private[deploy] class StandaloneRestServer(
     masterUrl: String)
   extends RestSubmissionServer(host, requestedPort, masterConf) {
 
+  // 此处就是拦截restsubmisson提交的请求的拦截器
   protected override val submitRequestServlet =
     new StandaloneSubmitRequestServlet(masterEndpoint, masterUrl, masterConf)
   protected override val killRequestServlet =
@@ -129,6 +130,7 @@ private[rest] class StandaloneSubmitRequestServlet(
     val appResource = Option(request.appResource).getOrElse {
       throw new SubmitRestMissingFieldException("Application jar is missing.")
     }
+    // 获取用户指定的mainclass
     val mainClass = Option(request.mainClass).getOrElse {
       throw new SubmitRestMissingFieldException("Main class is missing.")
     }
@@ -168,6 +170,7 @@ private[rest] class StandaloneSubmitRequestServlet(
     val extraJavaOpts = driverExtraJavaOptions.map(Utils.splitCommandString).getOrElse(Seq.empty)
     val sparkJavaOpts = Utils.sparkJavaOpts(conf)
     val javaOpts = sparkJavaOpts ++ defaultJavaOpts ++ extraJavaOpts
+    // mainclass 是我们自己的类名称
     val command = new Command(
       "org.apache.spark.deploy.worker.DriverWrapper",
       Seq("{{WORKER_URL}}", "{{USER_JAR}}", mainClass) ++ appArgs, // args to the DriverWrapper
@@ -194,7 +197,10 @@ private[rest] class StandaloneSubmitRequestServlet(
       responseServlet: HttpServletResponse): SubmitRestProtocolResponse = {
     requestMessage match {
       case submitRequest: CreateSubmissionRequest =>
+        // 基于request构建driverdescription,driverdescription定义了driver进程所需的
+        // memory,cores,是否监控，以及启动driver的进程的Java命令
         val driverDescription = buildDriverDescription(submitRequest)
+        // 向master发送消息SubmitDriverResponse
         val response = masterEndpoint.askSync[DeployMessages.SubmitDriverResponse](
           DeployMessages.RequestSubmitDriver(driverDescription))
         val submitResponse = new CreateSubmissionResponse

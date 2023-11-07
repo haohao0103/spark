@@ -158,6 +158,11 @@ private[storage] class BlockInfoManager extends Logging {
    * assumed that the passed in [[BlockInfo]] object is persisted by the info manager and that it is
    * safe to modify it. The only way we can guarantee this is by having a unique lock per block ID
    * that has a longer lifespan than the blocks' info object.
+   * *我们正在使用它而不是在[[BlockInfo]]对象上同步，以避免竞争
+   * * `lockNewBlockForWriting`方法中的条件。当这个方法成功返回时，它是
+   * *假设传递给[[BlockInfo]]的对象被信息管理器持久化了
+   * *可以安全地修改它。我们可以保证这一点的唯一方法是每个块ID有一个唯一的锁
+   * *它的生命周期比块的info对象长。
    */
   private[this] val locks = Striped.lock(1024)
 
@@ -207,7 +212,7 @@ private[storage] class BlockInfoManager extends Logging {
     var done = false
     var result: Option[BlockInfo] = None
     while(!done) {
-      val wrapper = blockInfoWrappers.get(blockId)
+      val wrapper: BlockInfoWrapper = blockInfoWrappers.get(blockId)
       if (wrapper == null) {
         done = true
       } else {
@@ -218,6 +223,7 @@ private[storage] class BlockInfoManager extends Logging {
           } else if (!blocking) {
             done = true
           } else {
+            // 有写锁则等待，何时、何人唤醒它？
             condition.await()
           }
         }
@@ -262,6 +268,7 @@ private[storage] class BlockInfoManager extends Logging {
       blocking: Boolean = true): Option[BlockInfo] = {
     val taskAttemptId = currentTaskAttemptId
     logTrace(s"Task $taskAttemptId trying to acquire read lock for $blockId")
+    // 尝试获取读锁
     acquireLock(blockId, blocking) { info =>
       val acquire = info.writerTask == BlockInfo.NO_WRITER
       if (acquire) {

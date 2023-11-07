@@ -85,6 +85,7 @@ private[sql] object Dataset {
   }
 
   def ofRows(sparkSession: SparkSession, logicalPlan: LogicalPlan): DataFrame =
+    // LogicalRelation里会包含数据集的关系，包括文件路径、格式、schema等
     sparkSession.withActive {
       val qe = sparkSession.sessionState.executePlan(logicalPlan)
       qe.assertAnalyzed()
@@ -189,9 +190,15 @@ private[sql] object Dataset {
 @Stable
 class Dataset[T] private[sql](
     @DeveloperApi @Unstable @transient val queryExecution: QueryExecution,
-    @DeveloperApi @Unstable @transient val encoder: Encoder[T])
+                             // queryExecution:查询执行，与rdd不同，rdd创建时会记录依赖的rdd以及从父rdd到
+                             //自身的函数，但dataset里主要有一个queryexecution,它描述了可以执行什么步骤得到这个dataset
+    @DeveloperApi @Unstable @transient val encoder: Encoder[T]
+                             // encoder:编码器，dataset是一个强类型结构，编译期间必须知道
+                             // dataset是什么数据类型，encoder就是告诉spark这个rdd是什么数据类型，什么schema
+                             )
   extends Serializable {
 
+  // spark sql中的核心，类似与rdd中的sparkcontext
   @transient lazy val sparkSession: SparkSession = {
     if (queryExecution == null || queryExecution.sparkSession == null) {
       throw QueryExecutionErrors.transformationsAndActionsNotInvokedByDriverError()
@@ -215,6 +222,7 @@ class Dataset[T] private[sql](
     this(sqlContext.sparkSession, logicalPlan, encoder)
   }
 
+  // 逻辑计划，就是得到当前DataSet的查询逻辑计划，它在queryExecution中
   @transient private[sql] val logicalPlan: LogicalPlan = {
     val plan = queryExecution.commandExecuted
     if (sparkSession.conf.get(SQLConf.FAIL_AMBIGUOUS_SELF_JOIN_ENABLED)) {
@@ -274,7 +282,7 @@ class Dataset[T] private[sql](
   private[sql] def getRows(
       numRows: Int,
       truncate: Int): Seq[Seq[String]] = {
-    val newDf = toDF()
+    val newDf: DataFrame = toDF()
     val castCols = newDf.logicalPlan.output.map { col =>
       // Since binary types in top-level schema fields have a specific format to print,
       // so we do not cast them to strings here.
@@ -3683,6 +3691,7 @@ class Dataset[T] private[sql](
   def unpersist(): this.type = unpersist(blocking = false)
 
   // Represents the `QueryExecution` used to produce the content of the Dataset as an `RDD`.
+  //DataSet可以转换成RDD，rddQueryExecution代表了生成对应RDD的查询执行
   @transient private lazy val rddQueryExecution: QueryExecution = {
     val deserialized = CatalystSerde.deserialize[T](logicalPlan)
     sparkSession.sessionState.executePlan(deserialized)

@@ -156,6 +156,7 @@ private[spark] class SparkSubmit extends Logging {
   private def submit(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
 
     def doRunMain(): Unit = {
+      // 处理有关代理用户的事情
       if (args.proxyUser != null) {
         val proxyUser = UserGroupInformation.createProxyUser(args.proxyUser,
           UserGroupInformation.getCurrentUser())
@@ -177,6 +178,7 @@ private[spark] class SparkSubmit extends Logging {
             }
         }
       } else {
+        // 无代理用户
         runMain(args, uninitLog)
       }
     }
@@ -658,6 +660,8 @@ private[spark] class SparkSubmit extends Logging {
     // In client mode, launch the application main class directly
     // In addition, add the main application jar and any added jars (if any) to the classpath
     if (deployMode == CLIENT) {
+      // 不管是standalone还是yarn得client，mainclass都是我们提交app指定的入口类，是我们自己的代码
+      // 入口
       childMainClass = args.mainClass
       if (localPrimaryResource != null && isUserJar(localPrimaryResource)) {
         childClasspath += localPrimaryResource
@@ -715,10 +719,12 @@ private[spark] class SparkSubmit extends Logging {
     // In standalone cluster mode, use the REST client to submit the application (Spark 1.3+).
     // All Spark parameters are expected to be passed to the client through system properties.
     if (args.isStandaloneCluster) {
+      // 默认情况下使用rest方式提交，mainclass为org.apache.spark.deploy.rest.RestSubmissionClientApp
       if (args.useRest) {
         childMainClass = REST_CLUSTER_SUBMIT_CLASS
         childArgs += (args.primaryResource, args.mainClass)
       } else {
+        // 在rest方式失败的情况下，mainclass为org.apache.spark.deploy.ClientApp
         // In legacy standalone cluster mode, use Client as a wrapper around the user class
         childMainClass = STANDALONE_CLUSTER_SUBMIT_CLASS
         if (args.supervise) { childArgs += "--supervise" }
@@ -746,6 +752,7 @@ private[spark] class SparkSubmit extends Logging {
 
     // In yarn-cluster mode, use yarn.Client as a wrapper around the user class
     if (isYarnCluster) {
+      // 如果是YarnCluster，childmainclass为org.apache.spark.deploy.yarn.YarnClusterApplication
       childMainClass = YARN_CLUSTER_SUBMIT_CLASS
       if (args.isPython) {
         childArgs += ("--primary-py-file", args.primaryResource)
@@ -898,6 +905,7 @@ private[spark] class SparkSubmit extends Logging {
    * running cluster deploy mode or python applications.
    */
   private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
+    // 获取程序运行的参数，classpath,mainclass
     val (childArgs, childClasspath, sparkConf, childMainClass) = prepareSubmitEnvironment(args)
     // Let the main class re-initialize the logging system once it starts.
     if (uninitLog) {
@@ -920,6 +928,7 @@ private[spark] class SparkSubmit extends Logging {
     var mainClass: Class[_] = null
 
     try {
+      // 这里的main class 不一定是我们提交程序指定的mainclass,只有client下才是我们指定mainclass
       mainClass = Utils.classForName(childMainClass)
     } catch {
       case e: ClassNotFoundException =>
@@ -955,6 +964,8 @@ private[spark] class SparkSubmit extends Logging {
     }
 
     try {
+      //此处是启动mainclass
+      // mainclass 以JavaMainApplication 为例
       app.start(childArgs.toArray, sparkConf)
     } catch {
       case t: Throwable =>

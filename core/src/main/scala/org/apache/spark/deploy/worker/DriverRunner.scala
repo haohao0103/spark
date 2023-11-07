@@ -86,6 +86,7 @@ private[deploy] class DriverRunner(
 
   /** Starts a thread to run and manage the driver. */
   private[worker] def start() = {
+    // 启动一个线程启动driver并管理监控该driver
     new Thread("DriverRunner for " + driverId) {
       override def run(): Unit = {
         var shutdownHook: AnyRef = null
@@ -96,6 +97,7 @@ private[deploy] class DriverRunner(
           }
 
           // prepare driver jars and run driver
+          //TODO
           val exitCode = prepareAndRunDriver()
 
           // set final state depending on if forcibly killed and process exit code
@@ -200,6 +202,7 @@ private[deploy] class DriverRunner(
     builder.environment.put("SPARK_DRIVER_LOG_URL_STDERR",
       s"$workerUrlRef/logPage/?driverId=$driverId&logType=stderr")
 
+    // 启动driver
     runDriver(builder, driverDir, driverDesc.supervise)
   }
 
@@ -217,6 +220,7 @@ private[deploy] class DriverRunner(
       Files.append(header, stderr, StandardCharsets.UTF_8)
       CommandUtils.redirectStream(process.getErrorStream, stderr)
     }
+    // TODO
     runCommandWithRetry(ProcessBuilderLike(builder), initialize, supervise)
   }
 

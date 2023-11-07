@@ -83,6 +83,8 @@ private[spark] class RestSubmissionClient(master: String) extends Logging {
     var response: SubmitRestProtocolResponse = null
     for (m <- masters if !handled) {
       validateMaster(m)
+      // 获取url
+      // url=http://$masterUrl/v1/submissions/create
       val url = getSubmitUrl(m)
       try {
         response = postJson(url, request.toJson)
@@ -177,8 +179,8 @@ private[spark] class RestSubmissionClient(master: String) extends Logging {
     val message = new CreateSubmissionRequest
     message.clientSparkVersion = sparkVersion
     message.appResource = appResource
-    message.mainClass = mainClass
-    message.appArgs = appArgs
+    message.mainClass = mainClass  // 我们自己指定的class
+    message.appArgs = appArgs  // 我们指定的运行参数
     message.sparkProperties = sparkProperties
     message.environmentVariables = environmentVariables
     message.validate()
@@ -434,7 +436,15 @@ private[spark] object RestSubmissionClient {
 
 private[spark] class RestSubmissionClientApp extends SparkApplication {
 
-  /** Submits a request to run the application and return the response. Visible for testing. */
+  /**
+   * Submits a request to run the application and return the response.
+   * Visible for testing. */
+  /**
+   *
+   * 如果是client模式,那么在本地直接执行我们的主代码类，该进程就是driver,
+   * 如果是standalone cluster模式，本地运行的mainclass为org.apache.spark.deploy.rest.RestSubmissionClientApp
+   * ，它不是driver进程，但它会向master发送http请求，master稍后会在worker上启动单独的driver进程
+   */
   def run(
       appResource: String,
       mainClass: String,
@@ -445,9 +455,12 @@ private[spark] class RestSubmissionClientApp extends SparkApplication {
       throw new IllegalArgumentException("'spark.master' must be set.")
     }
     val sparkProperties = conf.getAll.toMap
+
+    // 创建RestSubmissionClient实例，向master发送http请求
     val client = new RestSubmissionClient(master)
-    val submitRequest = client.constructSubmitRequest(
-      appResource, mainClass, appArgs, sparkProperties, env)
+    // 创建request实例
+    val submitRequest = client.constructSubmitRequest(appResource, mainClass, appArgs, sparkProperties, env)
+    // 向master发送请求
     client.createSubmission(submitRequest)
   }
 

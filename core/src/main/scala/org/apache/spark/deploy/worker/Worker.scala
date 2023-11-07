@@ -566,6 +566,7 @@ private[deploy] class Worker(
       logInfo(s"Master with url $masterUrl requested this worker to reconnect.")
       registerWithMaster()
 
+      // 启动executor
     case LaunchExecutor(masterUrl, appId, execId, rpId, appDesc, cores_, memory_, resources_) =>
       if (masterUrl != activeMasterUrl) {
         logWarning("Invalid Master (" + masterUrl + ") attempted to launch executor.")
@@ -660,6 +661,7 @@ private[deploy] class Worker(
 
     case LaunchDriver(driverId, driverDesc, resources_) =>
       logInfo(s"Asked to launch driver $driverId")
+      // 构造driverrunner
       val driver = new DriverRunner(
         conf,
         driverId,

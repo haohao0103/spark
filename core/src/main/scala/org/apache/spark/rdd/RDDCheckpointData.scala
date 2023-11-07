@@ -18,8 +18,7 @@
 package org.apache.spark.rdd
 
 import scala.reflect.ClassTag
-
-import org.apache.spark.Partition
+import org.apache.spark.{Partition}
 
 /**
  * Enumeration to manage state transitions of an RDD through checkpointing
@@ -43,6 +42,7 @@ private[spark] abstract class RDDCheckpointData[T: ClassTag](@transient private 
   import CheckpointState._
 
   // The checkpoint state of the associated RDD.
+  // 标记该rdd需要进行ck
   protected var cpState = Initialized
 
   // The RDD that contains our checkpointed data
@@ -78,6 +78,7 @@ private[spark] abstract class RDDCheckpointData[T: ClassTag](@transient private 
     RDDCheckpointData.synchronized {
       cpRDD = Some(newRDD)
       cpState = Checkpointed
+      // truncate the rdd lineage
       rdd.markCheckpointed()
     }
   }

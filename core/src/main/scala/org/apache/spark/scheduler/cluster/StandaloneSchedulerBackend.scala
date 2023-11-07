@@ -131,6 +131,7 @@ private[spark] class StandaloneSchedulerBackend(
       }
     val appDesc = ApplicationDescription(sc.appName, maxCores, command,
       webUrl, defaultProfile = defaultProf, sc.eventLogDir, sc.eventLogCodec, initialExecutorLimit)
+    // 负责与master进行通信，向master注册application
     client = new StandaloneAppClient(sc.env.rpcEnv, masters, appDesc, this, conf)
     client.start()
     launcherBackend.setState(SparkAppHandle.State.SUBMITTED)

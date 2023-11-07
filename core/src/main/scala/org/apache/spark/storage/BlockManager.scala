@@ -927,10 +927,14 @@ private[spark] class BlockManager(
         logDebug(s"Block $blockId was not found")
         None
       case Some(info) =>
-        val level = info.level
+        // 获取到block的storagelevel
+        val level: StorageLevel = info.level
         logDebug(s"Level for block $blockId is $level")
+        // 获取当前线程ThreadLocal里存放的TaskContext?
         val taskContext = Option(TaskContext.get())
+        // 从内存或者磁盘中获取到block数据并返回blockResult对象
         if (level.useMemory && memoryStore.contains(blockId)) {
+          // 如果level是使用内存，则通过blockid从memoryStore中获取数据并返回iterator,还要区分是否序列化
           val iter: Iterator[Any] = if (level.deserialized) {
             memoryStore.getValues(blockId).get
           } else {
@@ -939,8 +943,8 @@ private[spark] class BlockManager(
           }
           // We need to capture the current taskId in case the iterator completion is triggered
           // from a different thread which does not have TaskContext set; see SPARK-18406 for
-          // discussion.
-          val ci = CompletionIterator[Any, Iterator[Any]](iter, {
+          // discussion. ?
+          val ci: CompletionIterator[Any, Iterator[Any]] = CompletionIterator[Any, Iterator[Any]](iter, {
             releaseLock(blockId, taskContext)
           })
           Some(new BlockResult(ci, DataReadMethod.Memory, info.size))
@@ -978,6 +982,7 @@ private[spark] class BlockManager(
               throw t
           }
         } else {
+          // 处理本地存储失败的场景
           handleLocalReadFailure(blockId)
         }
     }
@@ -1050,11 +1055,13 @@ private[spark] class BlockManager(
    * Get block from remote block managers.
    *
    * This does not acquire a lock on this block in this JVM.
+   * 从远程块管理器获取块。
+   * 不会在JVM中获取这个块的锁。
    */
   private[spark] def getRemoteValues[T: ClassTag](blockId: BlockId): Option[BlockResult] = {
     val ct = implicitly[ClassTag[T]]
     getRemoteBlock(blockId, (data: ManagedBuffer) => {
-      val values =
+      val values: Iterator[T] =
         serializerManager.dataDeserializeStream(blockId, data.createInputStream())(ct)
       new BlockResult(values, DataReadMethod.Network, data.size)
     })
@@ -1267,7 +1274,7 @@ private[spark] class BlockManager(
    * automatically be freed once the result's `data` iterator is fully consumed.
    */
   def get[T: ClassTag](blockId: BlockId): Option[BlockResult] = {
-    val local = getLocalValues(blockId)
+    val local: Option[BlockResult] = getLocalValues(blockId)
     if (local.isDefined) {
       logInfo(s"Found block $blockId locally")
       return local
@@ -1292,14 +1299,21 @@ private[spark] class BlockManager(
    * The param `taskContext` should be passed in case we can't get the correct TaskContext,
    * for example, the input iterator of a cached RDD iterates to the end in a child
    * thread.
+   * 使用显式的TaskContext释放给定块上的锁。
+   * *应该传递参数`taskContext`，以防我们无法获得正确的taskContext，
+   * *例如，缓存RDD的输入迭代器会迭代到子节点的末尾
+   * *线程。
    */
   def releaseLock(blockId: BlockId, taskContext: Option[TaskContext] = None): Unit = {
     val taskAttemptId = taskContext.map(_.taskAttemptId())
     // SPARK-27666. When a task completes, Spark automatically releases all the blocks locked
     // by this task. We should not release any locks for a task that is already completed.
+    //火花- 27666。当一个任务完成时，Spark会自动释放锁定的所有内存块
+    //执行这个任务。我们不应该为已经完成的任务释放任何锁。？
     if (taskContext.isDefined && taskContext.get.isCompleted) {
       logWarning(s"Task ${taskAttemptId.get} already completed, not releasing lock for $blockId")
     } else {
+      // 此处释放？
       blockInfoManager.unlock(blockId, taskAttemptId)
     }
   }
@@ -1334,13 +1348,16 @@ private[spark] class BlockManager(
       makeIterator: () => Iterator[T]): Either[BlockResult, Iterator[T]] = {
     // Attempt to read the block from local or remote storage. If it's present, then we don't need
     // to go through the local-get-or-put path.
+    // 先尝试从blockmanager中获取block，获取到则直接返回
     get[T](blockId)(classTag) match {
       case Some(block) =>
-        return Left(block)
+        val value: Left[BlockResult, Nothing] = Left(block)
+        return value
       case _ =>
         // Need to compute the block.
     }
     // Initially we hold no locks on this block.
+    // 从blockmanager中未获取到block
     doPutIterator(blockId, makeIterator, level, classTag, keepReadLock = true) match {
       case None =>
         // doPut() didn't hand work back to us, so the block already existed or was successfully
@@ -1502,8 +1519,9 @@ private[spark] class BlockManager(
   /**
    * Put the given block according to the given level in one of the block stores, replicating
    * the values if necessary.
-   *
    * If the block already exists, this method will not overwrite it.
+   * 将给定的数据块按照给定的级别放入其中一个数据块存储中，进行复制必要时设置值。
+   * *如果块已经存在，这个方法不会覆盖它。
    *
    * @param keepReadLock if true, this method will hold the read lock when it returns (even if the
    *                     block already exists). If false, this method will hold no locks when it
@@ -1570,7 +1588,8 @@ private[spark] class BlockManager(
         size = diskStore.getSize(blockId)
       }
 
-      val putBlockStatus = getCurrentBlockStatus(blockId, info)
+      // 对block进行了存储，获取存储的status,这里还会更新level和
+      val putBlockStatus: BlockStatus = getCurrentBlockStatus(blockId, info)
       val blockWasSuccessfullyStored = putBlockStatus.storageLevel.isValid
       if (blockWasSuccessfullyStored) {
         // Now that the block is in either the memory or disk store, tell the master about it.
@@ -1579,14 +1598,16 @@ private[spark] class BlockManager(
           reportBlockStatus(blockId, putBlockStatus)
         }
         addUpdatedBlockStatusToTaskMetrics(blockId, putBlockStatus)
+        // 此处一定是locally存储吗？
         logDebug(s"Put block $blockId locally took ${Utils.getUsedTimeNs(startTimeNs)}")
         if (level.replication > 1) {
           val remoteStartTimeNs = System.nanoTime()
-          val bytesToReplicate = doGetLocalBytes(blockId, info)
+          // 从本地读取出block
+          val bytesToReplicate: BlockData = doGetLocalBytes(blockId, info)
           // [SPARK-16550] Erase the typed classTag when using default serialization, since
           // NettyBlockRpcServer crashes when deserializing repl-defined classes.
           // TODO(ekl) remove this once the classloader issue on the remote end is fixed.
-          val remoteClassTag = if (!serializerManager.canUseKryo(classTag)) {
+          val remoteClassTag: ClassTag[_ >: T] = if (!serializerManager.canUseKryo(classTag)) {
             scala.reflect.classTag[Any]
           } else {
             classTag

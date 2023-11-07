@@ -57,6 +57,22 @@ class QueryExecution(
     val logical: LogicalPlan,
     val tracker: QueryPlanningTracker = new QueryPlanningTracker,
     val mode: CommandExecutionMode.Value = CommandExecutionMode.ALL) extends Logging {
+  /**
+   * logical:  未解析的逻辑执行计划
+   *
+   * analyzed: 使用分析器解析后的逻辑执行计划
+   *
+   * commandExecuted:命令执行后的逻辑执行计划，例如DDL语句，在会Final SparkPlan执行之前优先执行，并非是惰性求值的；
+   *
+   * optimizedPlan:使用优化器优化后的逻辑执行计划
+   *
+   * sparkPlan:经逻辑计划翻译后物理执行计划，也叫做计划阶段的物理执行计划
+   *
+   * executePlan : 对翻译的物理执行计划进行优化后的执行计划，也叫做准备阶段的物理执行计划，例如将插入全阶段代码计划
+   *
+   * toRdd: 经最终物理执行计划生成的内部RDD，也可以说是DataSet转换而成的RDD，RDD的数据类型是InternalRow，也就是RDD[Row],不是强类型
+   * 数据结构，是通用类型
+   */
 
   val id: Long = QueryExecution.nextExecutionId
 
@@ -71,11 +87,13 @@ class QueryExecution(
     }
   }
 
+  // 经过分析器解析后的执行计划
   lazy val analyzed: LogicalPlan = executePhase(QueryPlanningTracker.ANALYSIS) {
     // We can't clone `logical` here, which will reset the `_analyzed` flag.
     sparkSession.sessionState.analyzer.executeAndCheck(logical, tracker)
   }
 
+  // 经过命令执行后的逻辑计划
   lazy val commandExecuted: LogicalPlan = mode match {
     case CommandExecutionMode.NON_ROOT => analyzed.mapChildren(eagerlyExecuteCommands)
     case CommandExecutionMode.ALL => eagerlyExecuteCommands(analyzed)
@@ -91,6 +109,7 @@ class QueryExecution(
     case _ => "command"
   }
 
+  // 执行命令语句，替换成命令执行后的逻辑计划commandResult
   private def eagerlyExecuteCommands(p: LogicalPlan) = p transformDown {
     case c: Command =>
       val qe = sparkSession.sessionState.executePlan(c, CommandExecutionMode.NON_ROOT)
@@ -115,6 +134,7 @@ class QueryExecution(
 
   def assertCommandExecuted(): Unit = commandExecuted
 
+  // 经过优化器优化过的逻辑计划
   lazy val optimizedPlan: LogicalPlan = {
     // We need to materialize the commandExecuted here because optimizedPlan is also tracked under
     // the optimizing phase
@@ -135,6 +155,7 @@ class QueryExecution(
 
   private def assertOptimized(): Unit = optimizedPlan
 
+  // 经过逻辑计划翻译而成的物理计划
   lazy val sparkPlan: SparkPlan = {
     // We need to materialize the optimizedPlan here because sparkPlan is also tracked under
     // the planning phase
@@ -148,6 +169,7 @@ class QueryExecution(
 
   // executedPlan should not be used to initialize any SparkPlan. It should be
   // only used for execution.
+  // spark 真正执行的物理计划
   lazy val executedPlan: SparkPlan = {
     // We need to materialize the optimizedPlan here, before tracking the planning phase, to ensure
     // that the optimization time is not counted as part of the planning phase.
@@ -158,6 +180,8 @@ class QueryExecution(
       QueryExecution.prepareForExecution(preparations, sparkPlan.clone())
     }
   }
+
+
 
   /**
    * Internal version of the RDD. Avoids copies and has no schema.
@@ -172,6 +196,24 @@ class QueryExecution(
   lazy val toRdd: RDD[InternalRow] = new SQLExecutionRDD(
     executedPlan.execute(), sparkSession.sessionState.conf)
 
+  /**
+   * logical：未解析的逻辑执行计划
+   *
+   * analyzed：使用分析器解析后的逻辑执行计划
+   *
+   * commandExecuted：命令执行后的逻辑执行计划，例如一些DDL语句，在会Final SparkPlan执行之前优先执行，并非是惰性求值的
+   *
+   * optimizedPlan：使用优化器优化后的逻辑执行计划
+   *
+   * sparkPlan：经逻辑计划翻译后的物理执行计划，也叫作计划阶段的物理执行计划
+   *
+   * executePlan：对翻译的物理执行计划进行优化后的执行计划，也叫作准备阶段的物理执行计划，例如将插入全阶段代码计划
+   *
+   * toRdd：经最终物理执行计划生成的内部RDD，也可以说是DataSet转换而成的RDD，RDD的数据类型是InternalRow，也即RDD[Row]，不是一个强类型数据结构，是通用类型
+   */
+
+
+
   /** Get the metrics observed during the execution of the query plan. */
   def observedMetrics: Map[String, Row] = CollectMetricsExec.collect(executedPlan)
 
@@ -179,6 +221,7 @@ class QueryExecution(
     QueryExecution.preparations(sparkSession,
       Option(InsertAdaptiveSparkPlan(AdaptiveExecutionContext(sparkSession, this))), false)
   }
+
 
   protected def executePhase[T](phase: String)(block: => T): T = sparkSession.withActive {
     QueryExecution.withInternalError(s"The Spark SQL phase $phase failed with an internal error.") {

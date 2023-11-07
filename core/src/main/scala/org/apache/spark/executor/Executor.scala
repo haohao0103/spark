@@ -26,6 +26,7 @@ import java.util.{Locale, Properties}
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
+
 import javax.annotation.concurrent.GuardedBy
 import javax.ws.rs.core.UriBuilder
 
@@ -34,10 +35,8 @@ import scala.collection.immutable
 import scala.collection.mutable.{ArrayBuffer, HashMap, Map, WrappedArray}
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
-
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 import org.slf4j.MDC
-
 import org.apache.spark._
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
@@ -48,6 +47,7 @@ import org.apache.spark.metrics.source.JVMCPUSource
 import org.apache.spark.resource.ResourceInformation
 import org.apache.spark.rpc.RpcTimeout
 import org.apache.spark.scheduler._
+import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.shuffle.{FetchFailedException, ShuffleBlockPusher}
 import org.apache.spark.storage.{StorageLevel, TaskResultBlockId}
 import org.apache.spark.util._
@@ -111,11 +111,13 @@ private[spark] class Executor(
   // interrupted by `Thread.interrupt()`. Some issues, such as KAFKA-1894, HADOOP-10622,
   // will hang forever if some methods are interrupted.
   private[executor] val threadPool = {
+    //创建线程的工厂类
     val threadFactory = new ThreadFactoryBuilder()
       .setDaemon(true)
       .setNameFormat("Executor task launch worker-%d")
       .setThreadFactory((r: Runnable) => new UninterruptibleThread(r, "unused"))
       .build()
+    // 创建线程池
     Executors.newCachedThreadPool(threadFactory).asInstanceOf[ThreadPoolExecutor]
   }
   private val schemes = conf.get(EXECUTOR_METRICS_FILESYSTEM_SCHEMES)
@@ -261,6 +263,7 @@ private[spark] class Executor(
    */
   private var decommissioned = false
 
+  // 启动heartbeater
   heartbeater.start()
 
   private val appStartTime = conf.getLong("spark.app.startTime", 0)
@@ -301,13 +304,15 @@ private[spark] class Executor(
 
   def launchTask(context: ExecutorBackend, taskDescription: TaskDescription): Unit = {
     val taskId = taskDescription.taskId
-    val tr = createTaskRunner(context, taskDescription)
+    // 创建taskrunner
+    val tr: TaskRunner = createTaskRunner(context, taskDescription)
     runningTasks.put(taskId, tr)
     val killMark = killMarks.get(taskId)
     if (killMark != null) {
       tr.kill(killMark._1, killMark._2)
       killMarks.remove(taskId)
     }
+    // 线程池中执行
     threadPool.execute(tr)
     if (decommissioned) {
       log.error(s"Launching a task while in decommissioned state.")
@@ -485,6 +490,7 @@ private[spark] class Executor(
     }
 
     override def run(): Unit = {
+      // 线程工作的地方
       setMDCForTask(taskName, mdcProperties)
       threadId = Thread.currentThread.getId
       Thread.currentThread.setName(threadName)
@@ -545,6 +551,8 @@ private[spark] class Executor(
         } else 0L
         var threwException = true
         val value = Utils.tryWithSafeFinally {
+          // 这个task就是shufflemaptask或者是resulttask的run方法，
+          // shufflemaptask或者是resulttask的run方法又会调用runtask()方法
           val res = task.run(
             taskAttemptId = taskId,
             attemptNumber = taskDescription.attemptNumber,
@@ -578,6 +586,7 @@ private[spark] class Executor(
             }
           }
         }
+
         task.context.fetchFailed.foreach { fetchFailure =>
           // uh-oh.  it appears the user code has caught the fetch-failure without throwing any
           // other exceptions.  Its *possible* this is what the user meant to do (though highly
@@ -586,6 +595,7 @@ private[spark] class Executor(
             s"unrecoverable fetch failures!  Most likely this means user code is incorrectly " +
             s"swallowing Spark's internal ${classOf[FetchFailedException]}", fetchFailure)
         }
+
         val taskFinishNs = System.nanoTime()
         val taskFinishCpu = if (threadMXBean.isCurrentThreadCpuTimeSupported) {
           threadMXBean.getCurrentThreadCpuTime
@@ -594,9 +604,9 @@ private[spark] class Executor(
         // If the task has been killed, let's fail it.
         task.context.killTaskIfInterrupted()
 
-        val resultSer = env.serializer.newInstance()
-        val beforeSerializationNs = System.nanoTime()
-        val valueBytes = resultSer.serialize(value)
+        val resultSer: SerializerInstance = env.serializer.newInstance()
+        val beforeSerializationNs: Long = System.nanoTime()
+        val valueBytes: ByteBuffer = resultSer.serialize(value)
         val afterSerializationNs = System.nanoTime()
 
         // Deserialization happens in two parts: first, we deserialize a Task object, which
@@ -659,7 +669,7 @@ private[spark] class Executor(
         val accumUpdates = task.collectAccumulatorUpdates()
         val metricPeaks = metricsPoller.getTaskMetricPeaks(taskId)
         // TODO: do not serialize value twice
-        val directResult = new DirectTaskResult(valueBytes, accumUpdates, metricPeaks)
+        val directResult: DirectTaskResult[Nothing] = new DirectTaskResult(valueBytes, accumUpdates, metricPeaks)
         val serializedDirectResult = ser.serialize(directResult)
         val resultSize = serializedDirectResult.limit()
 

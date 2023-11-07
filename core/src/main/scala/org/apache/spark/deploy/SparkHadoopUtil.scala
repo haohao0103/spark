@@ -18,6 +18,7 @@
 package org.apache.spark.deploy
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, DataOutputStream, File, IOException}
+import java.lang
 import java.net.InetAddress
 import java.security.PrivilegedExceptionAction
 import java.text.DateFormat
@@ -28,15 +29,14 @@ import scala.collection.immutable.Map
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
 import scala.util.control.NonFatal
-
 import com.google.common.primitives.Longs
 import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.FileSystem.Statistics
 import org.apache.hadoop.fs._
 import org.apache.hadoop.mapred.JobConf
 import org.apache.hadoop.security.{Credentials, UserGroupInformation}
 import org.apache.hadoop.security.token.{Token, TokenIdentifier}
 import org.apache.hadoop.security.token.delegation.AbstractDelegationTokenIdentifier
-
 import org.apache.spark.{SparkConf, SparkException}
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.config.BUFFER_SIZE
@@ -197,9 +197,19 @@ private[spark] class SparkHadoopUtil extends Logging {
    * @return None if the required method can't be found.
    */
   private[spark] def getFSBytesWrittenOnThreadCallback(): () => Long = {
-    val threadStats = FileSystem.getAllStatistics.asScala.map(_.getThreadStatistics)
-    val f = () => threadStats.map(_.getBytesWritten).sum
-    val baselineBytesWritten = f()
+    //    val value: Any = FileSystem.getGlobalStorageStatistics.asScala.map(_.getThreadStatistics)
+    val statistics: GlobalStorageStatistics = FileSystem.getGlobalStorageStatistics
+    val statisticses: Iterator[FileSystemStorageStatistics] = FileSystem.getGlobalStorageStatistics
+      .iterator()
+      .asScala
+      .map(_.asInstanceOf[FileSystemStorageStatistics]
+      )
+    val threadStats: mutable.Seq[Statistics.StatisticsData] = FileSystem.getAllStatistics.asScala.map(_.getThreadStatistics)
+
+//    val f: () => Long = () => threadStats.map(_.getBytesWritten).sum
+    val f: () => Long = () => statisticses.map(_.getLong("bytesWritten").asInstanceOf[Long]).sum
+
+    val baselineBytesWritten: Long = f()
     () => f() - baselineBytesWritten
   }
 

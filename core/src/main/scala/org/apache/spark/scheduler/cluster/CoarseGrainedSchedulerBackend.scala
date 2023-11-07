@@ -151,6 +151,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
       }, 0, reviveIntervalMs, TimeUnit.MILLISECONDS)
     }
 
+    // 有send 就有receive方法
     override def receive: PartialFunction[Any, Unit] = {
       case StatusUpdate(executorId, taskId, state, data, resources) =>
         scheduler.statusUpdate(taskId, state, data.value)
@@ -178,6 +179,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         scheduler.dagScheduler.shufflePushCompleted(shuffleId, shuffleMergeId, mapIndex)
 
       case ReviveOffers =>
+        // 任务分发
         makeOffers()
 
       case KillTask(taskId, executorId, interruptThread, reason) =>
@@ -347,12 +349,15 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
       val taskDescs = withLock {
         // Filter out executors under killing
         val activeExecutors = executorDataMap.filterKeys(isExecutorActive)
+        // seq[workoffer];WorkOffers是一个case class，包含了executor的execId，host，freeCores
         val workOffers = activeExecutors.map {
           case (id, executorData) => buildWorkerOffer(id, executorData)
         }.toIndexedSeq
+        // 进行task的分配，拿到分配好的task后开始执行task ，在launchTasks()
         scheduler.resourceOffers(workOffers, true)
       }
       if (taskDescs.nonEmpty) {
+        // 开始执行task
         launchTasks(taskDescs)
       }
     }
@@ -415,7 +420,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
           }
         }
         else {
-          val executorData = executorDataMap(task.executorId)
+          val executorData: ExecutorData = executorDataMap(task.executorId)
           // Do resources allocation here. The allocated resources will get released after the task
           // finishes.
           val rpId = executorData.resourceProfileId
@@ -430,6 +435,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
           logDebug(s"Launching task ${task.taskId} on executor id: ${task.executorId} hostname: " +
             s"${executorData.executorHost}.")
 
+          // 给executorendpoint发送消息 ，把序列化后的task发送过去
           executorData.executorEndpoint.send(LaunchTask(new SerializableBuffer(serializedTask)))
         }
       }
@@ -514,7 +520,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
     }
   }
 
-  val driverEndpoint = rpcEnv.setupEndpoint(ENDPOINT_NAME, createDriverEndpoint())
+  val driverEndpoint: RpcEndpointRef = rpcEnv.setupEndpoint(ENDPOINT_NAME, createDriverEndpoint())
 
   protected def minRegisteredRatio: Double = _minRegisteredRatio
 
@@ -655,6 +661,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
   }
 
   override def reviveOffers(): Unit = Utils.tryLogNonFatalError {
+    // 给driverendpoint发送消息ReviveOffers
     driverEndpoint.send(ReviveOffers)
   }
 

@@ -555,6 +555,7 @@ class SparkContext(config: SparkConf) extends Logging {
     _plugins = PluginContainer(this, _resources.asJava)
 
     // Create and start the scheduler
+    // sc启动时就会创建taskscheduler 该代码在sc创建的时候就会执行
     val (sched, ts) = SparkContext.createTaskScheduler(this, master)
     _schedulerBackend = sched
     _taskScheduler = ts
@@ -575,6 +576,7 @@ class SparkContext(config: SparkConf) extends Logging {
       conf.get(EXECUTOR_HEARTBEAT_INTERVAL))
     _heartbeater.start()
 
+    // 这里会调用_schedulerBackend的start方法
     // start TaskScheduler after taskScheduler sets DAGScheduler reference in DAGScheduler's
     // constructor
     _taskScheduler.start()
@@ -1923,6 +1925,7 @@ class SparkContext(config: SparkConf) extends Logging {
 
   /**
    * Register an RDD to be persisted in memory and/or disk storage
+   * persistentRdds map来记录所有的persisted的rdd
    */
   private[spark] def persistRDD(rdd: RDD[_]): Unit = {
     persistentRdds(rdd.id) = rdd
@@ -2215,7 +2218,8 @@ class SparkContext(config: SparkConf) extends Logging {
   /**
    * Run a function on a given set of partitions in an RDD and pass the results to the given
    * handler function. This is the main entry point for all actions in Spark.
-   *
+   * 对RDD中给定的一组分区数据运行一个函数，并将结果传递给给定的方法
+   * 处理函数。这是Spark中所有操作的主要入口。
    * @param rdd target RDD to run tasks on
    * @param func a function to run on each partition of the RDD
    * @param partitions set of partitions to run on; some jobs may not want to compute on all
@@ -2230,14 +2234,17 @@ class SparkContext(config: SparkConf) extends Logging {
     if (stopped.get()) {
       throw new IllegalStateException("SparkContext has been shutdown")
     }
-    val callSite = getCallSite
+    val callSite: CallSite = getCallSite
     val cleanedFunc = clean(func)
     logInfo("Starting job: " + callSite.shortForm)
     if (conf.getBoolean("spark.logLineage", false)) {
       logInfo("RDD's recursive dependencies:\n" + rdd.toDebugString)
     }
+    // 提交job
     dagScheduler.runJob(rdd, cleanedFunc, partitions, callSite, resultHandler, localProperties.get)
+
     progressBar.foreach(_.finishAll())
+    // 执行完毕后会进行checkpoint 可以参考《Checkpoint实现逻辑》
     rdd.doCheckpoint()
   }
 
@@ -2251,13 +2258,19 @@ class SparkContext(config: SparkConf) extends Logging {
    * partitions of the target RDD, e.g. for operations like `first()`
    * @return in-memory collection with a result of the job (each collection element will contain
    * a result from one partition)
+   * (index, res) => （results(index) = res）：ResultTask执行结果的处理函数，就是将执行结果放到数组中对应的partition_id下
    */
   def runJob[T, U: ClassTag](
       rdd: RDD[T],
       func: (TaskContext, Iterator[T]) => U,
       partitions: Seq[Int]): Array[U] = {
     val results = new Array[U](partitions.size)
-    runJob[T, U](rdd, func, partitions, (index, res) => results(index) = res)
+    runJob[T, U](
+      rdd,
+      func,
+      partitions,
+      (index, res) => results(index) = res
+    )
     results
   }
 
@@ -2267,7 +2280,7 @@ class SparkContext(config: SparkConf) extends Logging {
    * @param rdd target RDD to run tasks on
    * @param func a function to run on each partition of the RDD
    * @param partitions set of partitions to run on; some jobs may not want to compute on all
-   * partitions of the target RDD, e.g. for operations like `first()`
+   * partitions of the target RDD, e.g. for operations like `first()`；
    * @return in-memory collection with a result of the job (each collection element will contain
    * a result from one partition)
    */
@@ -2275,8 +2288,12 @@ class SparkContext(config: SparkConf) extends Logging {
       rdd: RDD[T],
       func: Iterator[T] => U,
       partitions: Seq[Int]): Array[U] = {
+    // 对传入的函数做了一层包装
     val cleanedFunc = clean(func)
-    runJob(rdd, (ctx: TaskContext, it: Iterator[T]) => cleanedFunc(it), partitions)
+    runJob(
+      rdd,
+      (ctx: TaskContext, it: Iterator[T]) => cleanedFunc(it),
+      partitions)
   }
 
   /**
@@ -2301,6 +2318,11 @@ class SparkContext(config: SparkConf) extends Logging {
    * a result from one partition)
    */
   def runJob[T, U: ClassTag](rdd: RDD[T], func: Iterator[T] => U): Array[U] = {
+    /**
+     * rdd:rdd自身
+     * func:ResultTask执行的计算每个分区数据量的函数
+     * rdd.partitions.indices:自身的分区列表
+     */
     runJob(rdd, func, rdd.partitions.indices)
   }
 
@@ -2491,6 +2513,11 @@ class SparkContext(config: SparkConf) extends Logging {
    * If <tt>checkSerializable</tt> is set, <tt>clean</tt> will also proactively
    * check to see if <tt>f</tt> is serializable and throw a <tt>SparkException</tt>
    * if not.
+   * 清理闭包，使其准备好被序列化并发送给任务
+   * *(删除$outer's中未引用的变量，更新REPL变量)
+   * *如果设置了<tt>checkSerializable</tt>， <tt>clean</tt>也会主动调用
+   * *检查<tt>f</tt>是否可序列化，并抛出<tt>SparkException</tt>
+   * *如果不是。
    *
    * @param f the closure to clean
    * @param checkSerializable whether or not to immediately check <tt>f</tt> for serializability
@@ -2967,6 +2994,7 @@ object SparkContext extends Logging {
         scheduler.initialize(backend)
         (backend, scheduler)
 
+        // standalone模式
       case SPARK_REGEX(sparkUrl) =>
         val scheduler = new TaskSchedulerImpl(sc)
         val masterUrls = sparkUrl.split(",").map("spark://" + _)

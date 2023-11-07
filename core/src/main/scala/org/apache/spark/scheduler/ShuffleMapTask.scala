@@ -23,8 +23,9 @@ import java.util.Properties
 
 import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.internal.{config, Logging}
+import org.apache.spark.internal.{Logging, config}
 import org.apache.spark.rdd.RDD
+import org.apache.spark.serializer.SerializerInstance
 
 /**
  * A ShuffleMapTask divides the elements of an RDD into multiple buckets (based on a partitioner
@@ -76,6 +77,11 @@ private[spark] class ShuffleMapTask(
     if (locs == null) Nil else locs.distinct
   }
 
+  /**
+
+   * shufflemaptask的执行入口
+   *  shufflemaptask的执行结果
+   */
   override def runTask(context: TaskContext): MapStatus = {
     // Deserialize the RDD using the broadcast variable.
     val threadMXBean = ManagementFactory.getThreadMXBean
@@ -83,21 +89,26 @@ private[spark] class ShuffleMapTask(
     val deserializeStartCpuTime = if (threadMXBean.isCurrentThreadCpuTimeSupported) {
       threadMXBean.getCurrentThreadCpuTime
     } else 0L
-    val ser = SparkEnv.get.closureSerializer.newInstance()
-    val rddAndDep = ser.deserialize[(RDD[_], ShuffleDependency[_, _, _])](
+    val ser: SerializerInstance = SparkEnv.get.closureSerializer.newInstance()
+
+    // 把taskBinary 反序列化，得到rdd和ShuffleDependency
+    val rddAndDep: (RDD[_], ShuffleDependency[_, _, _]) = ser.deserialize[(RDD[_], ShuffleDependency[_, _, _])](
       ByteBuffer.wrap(taskBinary.value), Thread.currentThread.getContextClassLoader)
+
     _executorDeserializeTimeNs = System.nanoTime() - deserializeStartTimeNs
     _executorDeserializeCpuTime = if (threadMXBean.isCurrentThreadCpuTimeSupported) {
       threadMXBean.getCurrentThreadCpuTime - deserializeStartCpuTime
     } else 0L
 
-    val rdd = rddAndDep._1
-    val dep = rddAndDep._2
+    val rdd: RDD[_] = rddAndDep._1
+    val dep: ShuffleDependency[_, _, _] = rddAndDep._2
     // While we use the old shuffle fetch protocol, we use partitionId as mapId in the
     // ShuffleBlockId construction.
     val mapId = if (SparkEnv.get.conf.get(config.SHUFFLE_USE_OLD_FETCH_PROTOCOL)) {
       partitionId
     } else context.taskAttemptId()
+    // ShuffleDependency 获取到shuffleWriterProcessor，ShuffleWriteProcessor 是在ShuffleDependency创建
+    // 的时候被创建出来的
     dep.shuffleWriterProcessor.write(rdd, dep, mapId, context, partition)
   }
 

@@ -242,9 +242,10 @@ private[spark] class TaskSchedulerImpl(
     logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks "
       + "resource profile " + taskSet.resourceProfileId)
     this.synchronized {
-      val manager = createTaskSetManager(taskSet, maxTaskFailures)
+      // 创建tasksetmanager
+      val manager: TaskSetManager = createTaskSetManager(taskSet, maxTaskFailures)
       val stage = taskSet.stageId
-      val stageTaskSets =
+      val stageTaskSets: mutable.Map[Int, TaskSetManager] =
         taskSetsByStageIdAndAttempt.getOrElseUpdate(stage, new HashMap[Int, TaskSetManager])
 
       // Mark all the existing TaskSetManagers of this stage as zombie, as we are adding a new one.
@@ -256,10 +257,20 @@ private[spark] class TaskSchedulerImpl(
       // and somehow it has missing map outputs, then DAGScheduler will resubmit it and create a
       // TSM3 for it. As a stage can't have more than one active task set managers, we must mark
       // TSM2 as zombie (it actually is).
+      //将这一阶段所有现有的taskset管理器标记为zombie，因为我们正在添加一个新的taskset管理器。
+      //这对于处理边界情况是必要的。假设一个阶段有10个分区，其中有2个
+      // TaskSetManagers: TSM1(zombie)和TSM2(active)。TSM1对分区10有一个正在运行的任务
+      //然后它完成了。TSM2完成了1-9分区的任务，并认为他仍然是活跃的
+      //因为分区10还没有完成。然而，DAGScheduler会完成任务
+      //所有10个分区的事件，并认为阶段完成。如果是洗牌阶段
+      //然后不知何故它缺少了map输出，然后DAGScheduler会重新提交它并创建一个
+      // TSM3。由于一个阶段不能有多个活动任务集管理器，我们必须标记
+      // TSM2是僵尸(实际上是)。
       stageTaskSets.foreach { case (_, ts) =>
         ts.isZombie = true
       }
       stageTaskSets(taskSet.stageAttemptId) = manager
+      // schedulableBuilder 中有调度池，调度模式有FIFO 和FAIR ，决定了tasksetmanager调度的先后顺序
       schedulableBuilder.addTaskSetManager(manager, manager.taskSet.properties)
 
       if (!isLocal && !hasReceivedTask) {
@@ -277,6 +288,7 @@ private[spark] class TaskSchedulerImpl(
       }
       hasReceivedTask = true
     }
+    // schduler进行task的分发
     backend.reviveOffers()
   }
 

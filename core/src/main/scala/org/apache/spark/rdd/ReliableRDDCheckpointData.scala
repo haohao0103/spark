@@ -29,12 +29,15 @@ import org.apache.spark.internal.config.CLEANER_REFERENCE_TRACKING_CLEAN_CHECKPO
 /**
  * An implementation of checkpointing that writes the RDD data to reliable storage.
  * This allows drivers to be restarted on failure with previously computed state.
+ * 将RDD数据写入可靠存储的检查点机制的实现。
+ * *这允许驱动程序在出现故障时使用之前计算的状态重新启动
  */
 private[spark] class ReliableRDDCheckpointData[T: ClassTag](@transient private val rdd: RDD[T])
   extends RDDCheckpointData[T](rdd) with Logging {
 
   // The directory to which the associated RDD has been checkpointed to
   // This is assumed to be a non-local path that points to some reliable storage
+  // 检验是否是可靠存储，这个方法创建时会执行，再关注父类是否有相应方法会执行，如何标记该rdd需要进行ck
   private val cpDir: String =
     ReliableRDDCheckpointData.checkpointPath(rdd.context, rdd.id)
       .map(_.toString)

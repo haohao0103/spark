@@ -131,6 +131,7 @@ private[deploy] class Master(
         "authentication.")
   }
 
+  // rpc是基础，每个角色在启动过程中做了哪些重要的东西
   override def onStart(): Unit = {
     logInfo("Starting Spark master at " + masterUrl)
     logInfo(s"Running Spark version ${org.apache.spark.SPARK_VERSION}")
@@ -153,10 +154,12 @@ private[deploy] class Master(
       () => Utils.tryLogNonFatalError { self.send(CheckForWorkerTimeOut) },
       0, workerTimeoutMs, TimeUnit.MILLISECONDS)
 
+    //启动restserver 端口为6066
     if (restServerEnabled) {
       val port = conf.get(MASTER_REST_SERVER_PORT)
       restServer = Some(new StandaloneRestServer(address.host, port, conf, self, masterUrl))
     }
+    // restserver
     restServerBoundPort = restServer.map(_.start())
 
     masterMetricsSystem.registerSource(masterSource)
@@ -300,6 +303,7 @@ private[deploy] class Master(
         logInfo("Registered app " + description.name + " with ID " + app.id)
         persistenceEngine.addApplication(app)
         driver.send(RegisteredApplication(app.id, self))
+        // 开始调度application的executor,以及其它driver的资源
         schedule()
       }
 
@@ -403,7 +407,7 @@ private[deploy] class Master(
       timeOutDeadWorkers()
 
   }
-
+//SubmitDriverResponse
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
     case RequestSubmitDriver(description) =>
       if (state != RecoveryState.ALIVE) {
@@ -416,6 +420,7 @@ private[deploy] class Master(
         persistenceEngine.addDriver(driver)
         waitingDrivers += driver
         drivers.add(driver)
+        // 资源调度就在此处实现
         schedule()
 
         // TODO: It might be good to instead have the submission client poll the master to determine
@@ -754,6 +759,7 @@ private[deploy] class Master(
 
           // Now that we've decided how many cores to allocate on each worker, let's allocate them
           for (pos <- usableWorkers.indices if assignedCores(pos) > 0) {
+            //master 通知worker启动executor，向worker发送消息依次启动每个executor
             allocateWorkerResourceToExecutors(
               app,
               assignedCores(pos),
@@ -790,6 +796,7 @@ private[deploy] class Master(
       val allocated = worker.acquireResources(resourceDesc.customResourcesPerExecutor)
       val exec = app.addExecutor(
         worker, coresToAssign, resourceDesc.memoryMbPerExecutor, allocated, rpId)
+      // 启动executor
       launchExecutor(worker, exec)
       app.state = ApplicationState.RUNNING
     }
@@ -854,6 +861,7 @@ private[deploy] class Master(
         if (canLaunchDriver(worker, driver.desc)) {
           val allocated = worker.acquireResources(driver.desc.resourceReqs)
           driver.withResources(allocated)
+          // 向worker发送消息启动driver
           launchDriver(worker, driver)
           waitingDrivers -= driver
           launched = true
@@ -864,6 +872,7 @@ private[deploy] class Master(
         logWarning(s"Driver ${driver.id} requires more resource than any of Workers could have.")
       }
     }
+    // 为application 分配executor资源
     startExecutorsOnWorkers()
   }
 

@@ -135,7 +135,7 @@ class StandaloneRestSubmitSuite extends SparkFunSuite {
 
   test("request submission status") {
     val submissionId = "my-uber-driver"
-    val submissionState = KILLED
+    val submissionState = SUBMITTED
     val submissionException = new Exception("there was an irresponsible mix of alcohol and cars")
     val masterUrl = startDummyServer(state = submissionState, exception = Some(submissionException))
     val response = new RestSubmissionClient(masterUrl).requestSubmissionStatus(submissionId)
